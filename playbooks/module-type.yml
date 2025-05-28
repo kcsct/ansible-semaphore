@@ -1,0 +1,77 @@
+---
+- name: Dispatch ATI command and validate
+  hosts: "{{ target_group }}"
+  gather_facts: false
+
+  vars:
+    modules:
+      - BGS2
+      - ELS62-E
+
+    atcmd_payload:
+      timeout: 10
+      payload:
+        request: "AtCmd"
+        params:
+          command: "ATI"
+
+  tasks:
+    - name: POST ATI command to device
+      ansible.builtin.uri:
+        url: "http://{{ inventory_hostname }}/deviceManager"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body: "{{ atcmd_payload }}"
+        body_format: json
+        return_content: yes
+      delegate_to: localhost
+      register: resp
+      failed_when: >
+        resp.status != 200 or
+        (resp.content | from_json).result.value == "ERROR" or
+        "ATI" not in (resp.content | from_json).result.value or
+        "OK"  not in (resp.content | from_json).result.value or
+        not ( modules
+              | select("in", (resp.content | from_json).result.value)
+              | list )
+
+    - name: Record matched module type
+      set_fact:
+        atcmd_value: >-
+          {{
+            (modules
+             | select("in", (resp.content | from_json).result.value)
+             | list
+            )[0]
+          }}
+
+- name: Append successes to CSV
+  hosts: localhost
+  gather_facts: true
+  vars:
+    report_file: "/reports/replace_url_report.csv"
+    run_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+  tasks:
+    - name: Ensure CSV header exists
+      ansible.builtin.lineinfile:
+        path: "{{ report_file }}"
+        create: yes
+        insertafter: BOF
+        line: "timestamp,host,module_type"
+        mode: "0664"
+      run_once: true
+
+    - name: Append this run’s results to CSV
+      ansible.builtin.lineinfile:
+        path: "{{ report_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ run_timestamp }},{{ item }},{{ hostvars[item].atcmd_value }}"
+        mode: "0664"
+      loop: "{{ groups[target_group] }}"
+      when: hostvars[item].atcmd_value is defined
+      loop_control:
+        label: "{{ item }}"
+

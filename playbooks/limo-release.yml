@@ -1,0 +1,49 @@
+# playbooks/gen1-limo-with-kernel.yml
+- name: Collect LIMO release and kernel info
+  hosts: "{{ target_group }}"
+  gather_facts: false
+
+  tasks:
+    - name: Read LIMO release date
+      raw: cat /etc/LIMO-RELEASE
+      register: release_out
+
+    - name: Get kernel release (uname -r)
+      raw: uname -r
+      register: kr_out
+
+    - name: Get kernel build date (uname -v)
+      raw: uname -v
+      register: kv_out
+
+    - name: Store all three values as host facts
+      set_fact:
+        limo_release_date: "{{ release_out.stdout | trim }}"
+        kernel_release:     "{{ kr_out.stdout     | trim }}"
+        kernel_build_date:  "{{ kv_out.stdout     | trim }}"
+
+- name: Append run to CSV report
+  hosts: localhost
+  gather_facts: true    # to get ansible_date_time
+  vars:
+    report_file: "{{ playbook_dir }}/../reports/limo_release_report.csv"
+    run_timestamp: "{{ ansible_date_time.iso8601 }}"
+  tasks:
+    - name: Ensure CSV header exists
+      lineinfile:
+        path:   "{{ report_file }}"
+        create: yes
+        line:   "timestamp,host,limo_release_date,kernel_release,kernel_build_date"
+        mode: "0664"
+        insertafter: BOF
+      run_once: true
+
+    - name: Append this run’s data for each host
+      lineinfile:
+        path:   "{{ report_file }}"
+        create: yes
+        line:   "{{ run_timestamp }},{{ item }},{{ hostvars[item].limo_release_date }},{{ hostvars[item].kernel_release }},{{ hostvars[item].kernel_build_date }}"
+        mode: "0664"
+        insertafter: EOF
+      loop: "{{ groups[target_group] }}"
+

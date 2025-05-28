@@ -1,0 +1,102 @@
+---
+- name: Replace URL in SQLite DB and record results
+  hosts: "{{ target_group }}"
+  remote_user: root
+  become: yes
+  gather_facts: false
+
+  vars:
+    db_path:    "/var/www/objdb.db"
+    type_descr: "Periodic Cloud Instance"
+
+  tasks:
+    - name: Check if URL exists
+      raw: >-
+        sqlite3 {{ db_path }} "SELECT 1
+         FROM properties p
+         JOIN object o ON o.id = p.object_id
+         WHERE p.val_text='{{ search_url }}'
+           AND p.property_type_id=(
+             SELECT id FROM property_type WHERE descr='URL'
+           )
+           AND o.object_type_id=(
+             SELECT id FROM object_type WHERE descr='{{ type_descr }}'
+           );"
+      register: before
+      failed_when: false
+
+    - name: Update URL to '{{ replace_url }}'
+      raw: >-
+        sqlite3 {{ db_path }} "UPDATE properties
+         SET val_text='{{ replace_url }}'
+         WHERE val_text='{{ search_url }}'
+           AND property_type_id=(
+             SELECT id FROM property_type WHERE descr='URL'
+           )
+           AND object_id IN (
+             SELECT id FROM object
+             WHERE object_type_id=(
+               SELECT id FROM object_type WHERE descr='{{ type_descr }}'
+             )
+           );"
+      register: upd
+      changed_when: upd.rc == 0
+      failed_when: false
+
+    - name: Verify update
+      raw: >-
+        sqlite3 {{ db_path }} "SELECT 1
+         FROM properties p
+         WHERE p.val_text='{{ replace_url }}'
+           AND p.property_type_id=(
+             SELECT id FROM property_type WHERE descr='URL'
+           )
+           AND p.object_id IN (
+             SELECT id FROM object
+             WHERE object_type_id=(
+               SELECT id FROM object_type WHERE descr='{{ type_descr }}'
+             )
+           );"
+      register: after
+      failed_when: false
+
+    - name: Set report_status fact
+      set_fact:
+        report_status: >-
+          {{ 'not found' if before.stdout_lines|length == 0 
+             else ('changed' if after.stdout_lines|length > 0 else 'failed') }}
+
+    - name: Set report_value fact
+      set_fact:
+        report_value: "{{ replace_url if report_status == 'changed' else '' }}"
+
+- name: Append results to CSV report
+  hosts: localhost
+  gather_facts: true   # for ansible_date_time
+  vars:
+    report_file: "/reports/replace_url_report.csv"
+    run_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+  tasks:
+    - name: Ensure CSV header exists
+      lineinfile:
+        path: "{{ report_file }}"
+        create: yes
+        insertafter: BOF
+        line: "timestamp,host,status,value"
+        mode: "0664"
+      run_once: true
+
+    - name: Append each host’s result
+      lineinfile:
+        path: "{{ report_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ run_timestamp }},{{ item }},{{ hostvars[item].report_status }},{{ hostvars[item].report_value }}"
+        mode: "0664"
+      loop: "{{ groups[target_group] }}"
+      when: hostvars[item].report_status is defined
+      loop_control:
+        label: "{{ item }}"
+      ignore_errors: yes
+
