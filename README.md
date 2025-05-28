@@ -4,7 +4,8 @@ This repository contains:
 
 * **Playbooks** (`./playbooks/`)
 * **Docker Compose** configuration (`docker-compose.yml`)
-* **Inventory**, **Config**, **Reports**, and **Retry Files** folders
+* **Reports** (`./reports`)
+* **Retry Files** (`./playbooks/retry_files`)
 
 Before you `docker-compose up`, you need to set up a **semaphore** user on the host (so that the container can run as a non-root user) and grant group read/write permissions on the mounted directories.
 
@@ -93,5 +94,4 @@ docker-compose up -d
 2. **Retry run** template → uses `--limit @retry_files/...` → re-runs only the failed hosts.
 3. **Reports** are CSV files in `./reports/` for auditing run status.
 
-Please reach out if you have any questions or need further customization!
 
